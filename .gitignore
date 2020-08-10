@@ -1,0 +1,10 @@
+pkl
+dataset
+.idea
+venv
+*checkpoint*
+*.png
+*.log
+__pycache__
+*.pkl
+my_model

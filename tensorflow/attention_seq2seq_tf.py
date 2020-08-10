@@ -50,7 +50,8 @@ class att_seq2seq_tf():
 
         return decoded_sentence
 
-    def learn(self, hidden_size=300, embedding_dim=300, epoch=10, batch_size=128):
+    # isload_model parameter must be False always
+    def learn(self, hidden_size=300, embedding_dim=300, epoch=10, batch_size=128, isload_model=False):
         # load data
         if os.path.isfile("./qadf_tf.pkl"):
             self.x_train, self.t_train = preprocessing.load_preprocess('./qadf_tf.pkl')
@@ -64,82 +65,87 @@ class att_seq2seq_tf():
 
         self.max_len = self.x_train.shape[1]
 
-        # encoder
-        embedding_dim = embedding_dim
-        hidden_size = hidden_size
+        model = None
 
-        encoder_inputs = Input(shape = (self.x_train.shape[1],))
+        if os.path.isdir('./my_model') and isload_model:
+            model = load_model('./my_model', compile=False)
+            print('model loaded...')
 
-        # encoder embedding
-        encoder_embed = Embedding(len(preprocessing.word_to_id), embedding_dim)(encoder_inputs)
+        else:
+            print('creating model...')
+            # encoder
+            embedding_dim = embedding_dim
+            hidden_size = hidden_size
 
-        # encoder LSTM
-        encoder_lstm1 = LSTM(hidden_size, return_sequences=True, return_state=True,
-                             dropout= 0.4)
-        encoder_output1, state_h1, state_c1 = encoder_lstm1(encoder_embed)
+            encoder_inputs = Input(shape = (self.x_train.shape[1],))
 
-        encoder_lstm2 = LSTM(hidden_size, return_sequences=True, return_state=True,
-                             dropout= 0.4)
-        encoder_output2, state_h2, state_c2 = encoder_lstm2(encoder_output1)
+            # encoder embedding
+            encoder_embed = Embedding(len(preprocessing.word_to_id), embedding_dim)(encoder_inputs)
 
-        encoder_lstm3 = LSTM(hidden_size, return_sequences=True, return_state=True,
-                             dropout= 0.4)
-        encoder_outputs, state_h, state_c = encoder_lstm2(encoder_output2)
+            # encoder LSTM
+            encoder_lstm1 = LSTM(hidden_size, return_sequences=True, return_state=True,
+                                 dropout= 0.4)
+            encoder_output1, state_h1, state_c1 = encoder_lstm1(encoder_embed)
 
-        # decoder
-        decoder_inputs = Input(shape=(None,))
+            encoder_lstm2 = LSTM(hidden_size, return_sequences=True, return_state=True,
+                                 dropout= 0.4)
+            encoder_output2, state_h2, state_c2 = encoder_lstm2(encoder_output1)
 
-        # decoder embedding
-        decoder_embed_layer = Embedding(len(preprocessing.word_to_id),embedding_dim)
-        decoder_embed = decoder_embed_layer(decoder_inputs)
+            encoder_lstm3 = LSTM(hidden_size, return_sequences=True, return_state=True,
+                                 dropout= 0.4)
+            encoder_outputs, state_h, state_c = encoder_lstm2(encoder_output2)
 
-        # decoder LSTM
-        decoder_lstm = LSTM(hidden_size, return_sequences=True, return_state=True,
-                            dropout=0.4)
-        decoder_outputs, _, _ = decoder_lstm(decoder_embed, initial_state=[state_h, state_c])
+            # decoder
+            decoder_inputs = Input(shape=(None,))
 
-        # softmax
-        # decoder_softmax = Dense(len(preprocessing.word_to_id), activation='softmax')
-        # decoder_softmax_outputs = decoder_softmax(decoder_outputs)
+            # decoder embedding
+            decoder_embed_layer = Embedding(len(preprocessing.word_to_id),embedding_dim)
+            decoder_embed = decoder_embed_layer(decoder_inputs)
 
-        # add attention
-        attention_layer = AttentionLayer(name='attention_layer')
-        attention_outputs, attention_states = attention_layer([encoder_outputs, decoder_outputs])
+            # decoder LSTM
+            decoder_lstm = LSTM(hidden_size, return_sequences=True, return_state=True,
+                                dropout=0.4)
+            decoder_outputs, _, _ = decoder_lstm(decoder_embed, initial_state=[state_h, state_c])
 
-        # connect attention results and hidden states of decoder
-        decoder_concat_inputs = Concatenate(axis= -1, name='concat_layer')([decoder_outputs, attention_outputs])
+            # softmax
+            # decoder_softmax = Dense(len(preprocessing.word_to_id), activation='softmax')
+            # decoder_softmax_outputs = decoder_softmax(decoder_outputs)
 
-        #softmax
-        decoder_softmax = Dense(len(preprocessing.word_to_id), activation='softmax')
-        decoder_softmax_outputs = decoder_softmax(decoder_concat_inputs)
+            # add attention
+            attention_layer = AttentionLayer(name='attention_layer')
+            attention_outputs, attention_states = attention_layer([encoder_outputs, decoder_outputs])
 
-        # define model
-        model = Model([encoder_inputs, decoder_inputs], decoder_softmax_outputs)
-        save_model(model, './my_model')
+            # connect attention results and hidden states of decoder
+            decoder_concat_inputs = Concatenate(axis= -1, name='concat_layer')([decoder_outputs, attention_outputs])
 
-        model.summary()
+            #softmax
+            decoder_softmax = Dense(len(preprocessing.word_to_id), activation='softmax')
+            decoder_softmax_outputs = decoder_softmax(decoder_concat_inputs)
+
+            # define model
+            model = Model([encoder_inputs, decoder_inputs], decoder_softmax_outputs)
+            save_model(model, './my_model')
+            model.summary()
 
         if os.path.isfile('mycheckpoint.index'):
             model.load_weights('mycheckpoint')
-            print("checkpoint loaded")
+            print("checkpoint loaded...")
 
         model.compile(optimizer='Adam', loss='sparse_categorical_crossentropy')
-
-        # set condition for early stopping
-        es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience = 0.1)
-
         # fit
-        history = model.fit([self.x_train, self.t_train[:, :-1]], self.t_train.reshape(self.t_train.shape[0], self.t_train.shape[1], 1)[:, 1:],
+        if epoch > 0:
+            # set condition for early stopping
+            es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=0.1)
+
+            history = model.fit([self.x_train, self.t_train[:, :-1]], self.t_train.reshape(self.t_train.shape[0], self.t_train.shape[1], 1)[:, 1:],
                             epochs = epoch, callbacks=[], batch_size=128,
                             validation_data=([self.x_test, self.t_test[:, :-1]], self.t_test.reshape(self.t_test.shape[0], self.t_test.shape[1], 1)[:, 1:]))
+            model.save_weights('mycheckpoint')
 
-        model.save_weights('mycheckpoint')
-
-        plt.plot(history.history['loss'], label='train_loss')
-        plt.plot(history.history['val_loss'], label='val_loss')
-        plt.legend()
-        plt.show()
-
+            plt.plot(history.history['loss'], label='train_loss')
+            plt.plot(history.history['val_loss'], label='val_loss')
+            plt.legend()
+            plt.show()
 
         # make test model
         self.encoder_model = Model(inputs=encoder_inputs, outputs=[encoder_outputs, state_h, state_c])
@@ -159,6 +165,9 @@ class att_seq2seq_tf():
         # decoder model
         self.decoder_model = Model([decoder_inputs]+[decoder_hidden_state_input, decoder_state_input_h, decoder_state_input_c],
                               [decoder_outputs2] + [state_h2, state_c2])
+
+        self.encoder_model.save('test_encoder')
+        self.decoder_model.save('test_decoder')
 
     def seq2text(self, input_seq):
         result = ''
@@ -190,11 +199,17 @@ class att_seq2seq_tf():
 if __name__ == '__main__':
     astf = att_seq2seq_tf()
     astf.learn(epoch=1)
-    print_num = 10
+    print_num = 1
     for i in range(print_num):
         print('------------------------------------------------')
         print('Q ', astf.seq2text(np.ravel(astf.x_test[i:i+1])))
         print('A ', astf.seq2text(np.ravel(astf.t_test[i:i+1])[1:]))
         print('M ', astf.decode_sequence(astf.x_test[i:i+1, :]))
-
-    astf.ask_question(input('Q : '))
+    print('------------------------------------------------')
+    print("채팅창에 '종료'를 입력하여 대화를 종료할 수 있습니다.")
+    me = ''
+    while True:
+        me = input('Q : ')
+        if me == '종료':
+            break
+        astf.ask_question(me)

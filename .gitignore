@@ -3,8 +3,11 @@ dataset
 .idea
 venv
 *checkpoint*
+*.data*
+*.index*
 *.png
 *.log
 __pycache__
 *.pkl
 my_model
+*.pb

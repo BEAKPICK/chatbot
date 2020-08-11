@@ -1,7 +1,6 @@
 #preprocessing for chatbot dataset
-# from tensorflow.keras.preprocessing.text import Tokenizer
-# from tensorflow.keras.preprocessing.sequence import pad_sequences
 import pandas as pd
+import os
 import pickle
 import random
 import numpy as np
@@ -91,13 +90,16 @@ def encode(input_str, size):
 # load data for chatbot
 # scaled_size option is for seq2seq
 # sos = start of sentence, eos = end of sentence
-def load_data(file_name='../dataset/Ch'
-                        'atbotData.csv', seed=1995, need_soseos=False, need_corpus=False,
+def load_data(file_name='../dataset/ChatbotData.csv', seed=1995, need_soseos=False, need_corpus=False,
               scaled_size=True, padding_num=-1, save=True, save_file_name='./pkl/qadf.pkl'):
     random.seed(seed)
     # get_external_stopwords()
 
     df = pd.read_csv(file_name)
+    if os.path.isfile('../dataset/myChatbotData.csv'):
+        df2 = pd.read_csv('../dataset/myChatbotData.csv')
+        df = pd.concat([df, df2])
+
     print("file loaded")
 
     okt = Okt()
@@ -133,7 +135,7 @@ def load_data(file_name='../dataset/Ch'
             corpus.append(q)
             corpus.append(a)
 
-    print("corpus ready")
+        print("corpus ready")
 
     tmp = [[x,y] for x, y in zip(enc_q, enc_a)]
     random.shuffle(tmp)

@@ -3,7 +3,6 @@ import os
 from tensorflow.python.keras.layers import Layer
 from tensorflow.python.keras import backend as K
 
-
 class AttentionLayer(Layer):
     """
     This class implements Bahdanau attention (https://arxiv.org/pdf/1409.0473.pdf).

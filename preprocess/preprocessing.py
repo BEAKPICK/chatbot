@@ -125,8 +125,8 @@ def load_data(file_name='../dataset/ChatbotData.csv', seed=1995, need_soseos=Fal
 
     print("id binded")
 
-    enc_q = convert_data(qdf, size=max_len, scaled_size=scaled_size, padding='post')
-    enc_a = convert_data(adf, size=max_len, scaled_size=scaled_size, padding='post')
+    enc_q = convert_data(qdf, size=max_len, scaled_size=scaled_size, padding='post', padding_num=padding_num)
+    enc_a = convert_data(adf, size=max_len, scaled_size=scaled_size, padding='post', padding_num=padding_num)
 
     print("words converted to ids")
 

@@ -73,8 +73,6 @@ for epoch in range(max_epoch):
     acc_list.append(acc)
     print('정확도 %.3f%%' % (acc * 100))
 
-
-
 # 그래프 그리기
 x = np.arange(len(acc_list))
 plt.plot(x, acc_list, marker='o')

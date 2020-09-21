@@ -19,11 +19,11 @@ from common import config
 config.GPU = True
 
 # 데이터 읽기
-# x_train, t_train = preprocessing.load_data(file_name='./dataset/myChatbotData.csv', need_soseos=True, save_file_name='./pkl/qadf2.pkl')
+x_train, t_train = preprocessing.load_data(file_name='./dataset/ChatbotData.csv', need_soseos=True, save_file_name='./pkl/qadf2.pkl')
 
 # 시간절약
 # x_train, t_train = preprocessing.load_preprocess('../pkl/qadf.pkl')
-x_train, t_train, model = integration.sum_att_models('./pkl/myAttentionSeq2seq.pkl', './pkl/qadf.pkl', './pkl/myAttentionSeq2seq2.pkl', './pkl/qadf2.pkl')
+# x_train, t_train, model = integration.sum_att_models('./pkl/myAttentionSeq2seq.pkl', './pkl/qadf.pkl', './pkl/myAttentionSeq2seq2.pkl', './pkl/qadf2.pkl')
 
 #test 나누기
 x_test, x_train = preprocessing.divide_test_train(x_train, test_rate=0.1)
@@ -40,10 +40,10 @@ batch_size = 128
 max_epoch = 20
 max_grad = 5.0
 
-# model = AttentionSeq2seq(vocab_size, wordvec_size, hidden_size)
+model = AttentionSeq2seq(vocab_size, wordvec_size, hidden_size)
 
-if os.path.isfile("./pkl/myAttentionSeq2seq3.pkl"):
-    model.load_params("./pkl/myAttentionSeq2seq3.pkl")
+# if os.path.isfile("./pkl/myAttentionSeq2seq3.pkl"):
+#     model.load_params("./pkl/myAttentionSeq2seq3.pkl")
 
 # model = Seq2seq(vocab_size, wordvec_size, hidden_size)
 #
@@ -60,7 +60,7 @@ for epoch in range(max_epoch):
     trainer.fit(x_train, t_train, max_epoch=1,
                 batch_size=batch_size, max_grad=max_grad)
 
-    model.save_params('./pkl/myAttentionSeq2seq3.pkl')
+    model.save_params('../pkl/myAttentionSeq2seq3.pkl')
 
     correct_num = 0
     for i in range(len(x_test)):

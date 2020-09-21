@@ -266,6 +266,48 @@ def eval_seq2seq(model, question, correct, id_to_char,
 
     return 1 if guess == correct else 0
 
+def eval_transformer(model, question, correct, id_to_char, eos_id,
+                 verbos=False, is_reverse=False):
+    # correct에 뒤의 0은 전부 제거
+    correct = [f for f in correct.flatten() if f != 0]
+
+    # 머릿글자
+    correct = correct[1:]
+    guess = model.generate(question)
+
+    # 문자열로 변환
+    question = ' '.join([id_to_char[int(c)] for c in question.flatten() if c in id_to_char])
+    correct = ' '.join([id_to_char[int(c)] for c in correct])
+
+    eid = guess[np.where(guess==eos_id)]
+    if len(eid) != 0:
+        guess = guess[:eid[0]]
+
+    guess_str = ' '.join([id_to_char[int(c)] for c in guess])
+
+    if verbos:
+        if is_reverse:
+            question = question[::-1]
+
+        colors = {'ok': '\033[92m', 'fail': '\033[91m', 'close': '\033[0m'}
+        print('Q', question)  # 띄어쓰기 없이 출력은 question
+        print('T', correct)  # 띄어쓰기 없이 출력은 correct
+
+        is_windows = os.name == 'nt'
+
+        if correct == guess_str:
+            mark = colors['ok'] + '☑' + colors['close']
+            if is_windows:
+                mark = 'O'
+            print(mark + ' ' + guess_str)
+        else:
+            mark = colors['fail'] + '☒' + colors['close']
+            if is_windows:
+                mark = 'X'
+            print(mark + ' ' + guess_str)
+        print('---')
+
+    return 1 if guess_str == correct else 0
 
 def analogy(a, b, c, word_to_id, id_to_word, word_matrix, top=5, answer=None):
     for word in (a, b, c):
@@ -303,4 +345,46 @@ def normalize(x):
     elif x.ndim == 1:
         s = np.sqrt((x * x).sum())
         x /= s
+    return x
+
+def pos_Encoding(x):
+    # x->(T,D)
+    x_dim, y_dim = x.shape
+    v = []
+    tmp = []
+    for i in range(x_dim):
+        for j in range(y_dim):
+            # 짝수일 때는 sin이용
+            if j % 2 == 0:
+                tmp.append(np.sin(i/(10000**((2*j)/y_dim))))
+            # 홀수일 떄는 cos이용
+            else:
+                tmp.append(np.cos(i/(10000**((2*j-1)/y_dim))))
+        v.append(tmp.copy())
+        tmp.clear()
+    return np.array(v)
+
+# padding인 부분은 가장 작은 음수를 넣어주는 함수
+# 파라미터 mask=True는 디코더에서 쓰인다.
+def masking(x, padding_num=0, mask=False):
+    # x->N,(T,D)
+    import sys
+    n_size, x_size, y_size = x.shape
+    for n in range(n_size):
+        for i in range(x_size):
+            for j in range(y_size):
+                if x[n,i,j] == padding_num:
+                    x[n,i,j] = -sys.maxsize-1
+                elif j > i and mask:
+                    x[n,i,j] = -sys.maxsize-1
+    return x
+
+# normalization for transformer (dim3)
+def normalization(x):
+    if x.ndim == 3:
+        N,_,_ = x.shape
+        for n in range(N):
+            x[n] = (x[n]-x[n].mean())/x[n].std()
+    elif x.ndim == 2:
+        x = (x-x.mean())/x.std()
     return x

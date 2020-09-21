@@ -22,22 +22,33 @@ from mytensorflow.attention import AttentionLayer
 
 class att_seq2seq_tf():
 
+    # input으로 받은 시퀀스를 decode하는 함수
     def decode_sequence(self, input_seq):
+        # encoder로 부터 hidden, cell, output을 모두 받기
         e_out, e_h, e_c = self.encoder_model.predict(input_seq)
+
+        # target_seq를 2차원으로 설정해주고 첫번쨰는 시작을 알리는 <sos>로 해줍니다.
         target_seq = np.zeros((1,1))
         target_seq[0,0] = preprocessing.word_to_id['<sos>']
 
+        # eos가 나올 때까지 멈추지 않기 때문에 미리 설정값을 정의해둡니다.
         stop_condition = False
         decoded_sentence = ''
 
         while not stop_condition:
+            # decoder에서 encoder의 output, hidden, cell을 모두 받아서 예측을 해오는 함수
+            # output에는 attention을 위한 모든 time_step의 hidden vector가 들어있을 것이고
+            # hidden과 cell은 decoder의 LSTM을 위해서 넘겨주는 용도입니다.
             output_tokens, h, c = self.decoder_model.predict([target_seq]+[e_out, e_h, e_c])
+
+            # output_tokens의 차원수를 1차원으로 줄여주고 가장 높은 값의 인덱스를 추출합니다.
             sampled_token_index = np.argmax(output_tokens[0, -1, :])
             sampled_token = preprocessing.id_to_word[sampled_token_index]
 
             if sampled_token != '<eos>':
                 decoded_sentence += sampled_token + ' '
 
+            # 출력 횟수가 지정한 max_len이 초과되면 루프를 종료한다.
             if sampled_token == '<eos>' or len(decoded_sentence.split())>=self.max_len-1:
                 stop_condition = True
 
@@ -151,7 +162,7 @@ class att_seq2seq_tf():
         model.compile(optimizer='Adam', loss='sparse_categorical_crossentropy')
 
         # fit
-        if not use_loaded and epoch > 0:
+        if  epoch > 0:
             # set condition for early stopping
             es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=0.1)
 
@@ -217,20 +228,20 @@ class att_seq2seq_tf():
 
 if __name__ == '__main__':
     astf = att_seq2seq_tf()
-    astf.learn(epoch=20)
+    astf.learn(epoch=10, use_loaded=True)
 
-    # if you need test in console
-    # print_num = 1
-    # for i in range(print_num):
-    #     print('------------------------------------------------')
-    #     print('Q ', astf.seq2text(np.ravel(astf.x_test[i:i+1])))
-    #     print('A ', astf.seq2text(np.ravel(astf.t_test[i:i+1])[1:]))
-    #     print('M ', astf.decode_sequence(astf.x_test[i:i+1, :]))
-    # print('------------------------------------------------')
-    # print("채팅창에 '종료'를 입력하여 대화를 종료할 수 있습니다.")
-    # me = ''
-    # while True:
-    #     me = input('Q : ')
-    #     if me == '종료':
-    #         break
-    #     astf.ask_question(me)
+    #if you need test in console
+    print_num = 5
+    for i in range(print_num):
+        print('------------------------------------------------')
+        print('Q ', astf.seq2text(np.ravel(astf.x_test[i:i+1])))
+        print('A ', astf.seq2text(np.ravel(astf.t_test[i:i+1])[1:]))
+        print('M ', astf.decode_sequence(astf.x_test[i:i+1, :]))
+    print('------------------------------------------------')
+    print("채팅창에 '종료'를 입력하여 대화를 종료할 수 있습니다.")
+    me = ''
+    while True:
+        me = input('Q : ')
+        if me == '종료':
+            break
+        astf.ask_question(me)

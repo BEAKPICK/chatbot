@@ -13,6 +13,8 @@ class AttentionLayer(Layer):
         super(AttentionLayer, self).__init__(**kwargs)
 
     def build(self, input_shape):
+        # assert => have to be true or cause AssertError
+        # isinstance => see input_shape is a list
         assert isinstance(input_shape, list)
         # Create a trainable weight variable for this layer.
 

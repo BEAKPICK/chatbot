@@ -15,6 +15,13 @@ def softmax(x):
         x = x - x.max(axis=1, keepdims=True)
         x = np.exp(x)
         x /= x.sum(axis=1, keepdims=True)
+    # 3차원이라면 x(N,T,D)가 들어온 것
+    elif x.ndim == 3:
+        N, _, _ = x.shape
+        for n in range(N):
+            x[n] = x[n] - x[n].max(axis=1, keepdims=True)
+            x[n] = np.exp(x[n])
+            x[n] = x[n]/x[n].sum(axis=1, keepdims=True)
     elif x.ndim == 1:
         x = x - np.max(x)
         x = np.exp(x) / np.sum(np.exp(x))

@@ -234,7 +234,7 @@ class TimeEmbedding:
 
     def forward(self, xs):
         N, T = xs.shape
-        V, D = self.W.shape
+        S, D = self.W.shape
 
         out = np.empty((N, T, D), dtype='f')#1,3,8
         self.layers = []
@@ -294,13 +294,14 @@ class TimeAffine:
 
 
 class TimeSoftmaxWithLoss:
-    def __init__(self):
+    def __init__(self, ignore_label=-1):
         self.params, self.grads = [], []
         self.cache = None
-        self.ignore_label = -1
+        self.ignore_label = ignore_label
 
     def forward(self, xs, ts):
-        N, T, V = xs.shape
+        # ts->(N,T)
+        N, T, S = xs.shape
 
         if ts.ndim == 3:  # 정답 레이블이 원핫 벡터인 경우
             ts = ts.argmax(axis=2)
@@ -308,21 +309,27 @@ class TimeSoftmaxWithLoss:
         mask = (ts != self.ignore_label)
 
         # 배치용과 시계열용을 정리(reshape)
-        xs = xs.reshape(N * T, V)
+        xs = xs.reshape(N * T, S)
         ts = ts.reshape(N * T)
         mask = mask.reshape(N * T)
 
         ys = softmax(xs)
+        # 0이 나오는 상황을 대비해 epsilon을 추가
+        # ys[np.where(ys==0)] = 1e-5
+
+        # ys->(N*T,S) / mask->(N*T,S)
         ls = np.log(ys[np.arange(N * T), ts])
         ls *= mask  # ignore_label에 해당하는 데이터는 손실을 0으로 설정
-        loss = -np.sum(ls)
+
+        # sum->nansum으로 변경
+        loss = -np.nansum(ls)
         loss /= mask.sum()
 
-        self.cache = (ts, ys, mask, (N, T, V))
+        self.cache = (ts, ys, mask, (N, T, S))
         return loss
 
     def backward(self, dout=1):
-        ts, ys, mask, (N, T, V) = self.cache
+        ts, ys, mask, (N, T, S) = self.cache
 
         dx = ys
         dx[np.arange(N * T), ts] -= 1
@@ -330,7 +337,7 @@ class TimeSoftmaxWithLoss:
         dx /= mask.sum()
         dx *= mask[:, np.newaxis]  # ignore_labelㅇㅔ 해당하는 데이터는 기울기를 0으로 설정
 
-        dx = dx.reshape((N, T, V))
+        dx = dx.reshape((N, T, S))
 
         return dx
 
@@ -613,6 +620,39 @@ class Simple_TimeAffine:
 
         return dxs
 
+class PositionalEmbedding(TimeEmbedding):
+    def __init__(self, d):
+        super().__init__(d)
 
+    def forward(self, xs):
+        N = 1
+        T = 0
+        if xs.ndim == 1:
+            # xs->(T,)
+            T, = xs.shape
+        elif xs.ndim == 2:
+            # N -> mini batch
+            # T -> time size
+            N, T = xs.shape
+        else:
+            print('invalid embed input')
+            exit()
+        V, D = self.W.shape
+        out = np.empty((N,T,D), dtype='f')
+        self.layers = []
+
+        for t in range(T):
+            layer = Embedding(self.W)
+            out[:, t, :] = layer.forward(xs[:, t])
+            self.layers.append(layer)
+
+        # embedding이 끝나면 pos_encoding을 진행한다.
+        # 첫번쨰 문장만 계산하고 그 값을 나머지에 모두 활용한다.
+        pos_E = pos_Encoding(out[0,:,:])
+
+        for n in range(N):
+            out[n, :, :] += pos_E
+
+        return out
 
 

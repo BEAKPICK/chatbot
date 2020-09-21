@@ -91,7 +91,7 @@ def encode(input_str, size):
 # scaled_size option is for seq2seq
 # sos = start of sentence, eos = end of sentence
 def load_data(file_name='../dataset/ChatbotData.csv', seed=1995, need_soseos=False, need_corpus=False,
-              scaled_size=True, padding_num=-1, save=True, save_file_name='./pkl/qadf.pkl'):
+              scaled_size=True, padding_num=-1, save=True, save_file_name='./pkl/qadf.pkl', time_size=35):
     random.seed(seed)
     # get_external_stopwords()
 
@@ -122,6 +122,9 @@ def load_data(file_name='../dataset/ChatbotData.csv', seed=1995, need_soseos=Fal
 
     #원래 encoder, decoder 각각 max_len을 따로 정하지만 여기서는 일상대화를 다루므로 같이 진행하였다.
     word_to_id, id_to_word, max_len = bind_id_all(qdf, adf)
+
+    if max_len < time_size:
+        max_len = time_size
 
     print("id binded")
 

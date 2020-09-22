@@ -311,7 +311,7 @@ class TimeSoftmaxWithLoss:
         # 배치용과 시계열용을 정리(reshape)
         xs = xs.reshape(N * T, S)
         ts = ts.reshape(N * T)
-        mask = mask.reshape(N * T)
+        mask = np.array(mask.reshape(N * T))
 
         ys = softmax(xs)
         # 0이 나오는 상황을 대비해 epsilon을 추가

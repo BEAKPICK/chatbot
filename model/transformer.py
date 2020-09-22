@@ -248,13 +248,6 @@ class Transformer(BaseModel):
         self.params+=self.e_embed.params
         self.grads+=self.e_embed.grads
 
-        embed_W2 = (rn(S, D) / 100).astype('f')
-        self.d_embed = PositionalEmbedding(embed_W2)
-        self.params+=self.d_embed.params
-        self.grads+=self.d_embed.grads
-
-
-
         self.encoders, self.decoders = [], []
         for _ in range(num_encoders):
             te = TransformerEncoder(wordvec_size=D,
@@ -283,7 +276,7 @@ class Transformer(BaseModel):
     def forward(self, xs, ts):
         # xs->(N,T) / eout, dout, ts->N,(T,D)
         eout = self.e_embed.forward(xs)
-        dout = self.d_embed.forward(xs)
+        dout = self.e_embed.forward(ts)
         N, T, D = eout.shape
 
         for encoder in self.encoders:
@@ -317,8 +310,6 @@ class Transformer(BaseModel):
             _, dout = self.decoders[i].backward(dout)
         ddout, dout = self.decoders[0].backward(dout)
 
-        self.d_embed.backward(dout)
-
         # dout->N,(T,D)
         for i in range(self.num_encoders-1, -1, -1):
             ddout = self.encoders[i].backward(ddout)
@@ -330,7 +321,7 @@ class Transformer(BaseModel):
         # 'GPT'는 transformer의 decoder만 이용
         if type == 'GPT':
             # xs->(T,), out->(T,D)
-            out = self.d_embed.forward(xs)
+            out = self.e_embed.forward(xs)
             # out->(1,T,D)
             # out = out[np.newaxis,:]
             for i in range(self.num_decoders):

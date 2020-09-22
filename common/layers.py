@@ -89,14 +89,14 @@ class QueryKeyMatMul:
 
 class ValueMatMul:
     def __init__(self, vW):
-        self.params = vW
-        self.grads = np.zeros_like(vW)
+        self.params = [vW]
+        self.grads = [np.zeros_like(vW)]
         self.x = None
 
     def forward(self, x):
         # x->N,(T,D), vW->(D,H)
         N,T,D = x.shape
-        vW = self.params
+        vW = self.params[0]
         H = vW.shape[1]
         self.x = x
 
@@ -109,13 +109,13 @@ class ValueMatMul:
 
     def backward(self, dout):
         # dout->N,(T,H), vW->(D,H)
-        vW = self.params
+        vW = self.params[0]
         N,T,H = dout.shape
         D = vW.shape[0]
 
         # self.x.T->N,(D,T) / dvW->(D,H)
         dvW = np.nansum(np.matmul(np.transpose(self.x, (0,2,1)), dout), axis=0)
-        self.grads[...] = dvW
+        self.grads[0][...] = dvW
 
         dx_out = np.empty((N,T,D), dtype='f')
 

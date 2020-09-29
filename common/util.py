@@ -230,7 +230,7 @@ def eval_seq2seq(model, question, correct, id_to_char,
                  verbos=False, is_reverse=False):
 
     # correct에 뒤의 -1은 전부 제거
-    correct = [f for f in correct.flatten() if f!=-1]
+    correct = [f for f in correct.flatten() if f!=0]
 
     # 머릿글자
     start_id = correct[0]
@@ -238,9 +238,9 @@ def eval_seq2seq(model, question, correct, id_to_char,
     guess = model.generate(question, start_id, len(correct))
 
     # 문자열로 변환
-    question = ' '.join([id_to_char[int(c)] for c in question.flatten()])
-    correct = ' '.join([id_to_char[int(c)] for c in correct])
-    guess = ' '.join([id_to_char[int(c)] for c in guess])
+    question = ' '.join([id_to_char[int(c)] for c in question.flatten() if c in id_to_char])
+    correct = ' '.join([id_to_char[int(c)] for c in correct if c in id_to_char])
+    guess = ' '.join([id_to_char[int(c)] for c in guess if c in id_to_char])
 
     if verbos:
         if is_reverse:
@@ -267,9 +267,9 @@ def eval_seq2seq(model, question, correct, id_to_char,
     return 1 if guess == correct else 0
 
 def eval_transformer(model, question, correct, id_to_char, eos_id,
-                 verbos=False, is_reverse=False):
+                 verbos=False, is_reverse=False, padding_num=0):
     # correct에 뒤의 0은 전부 제거
-    correct = [f for f in correct.flatten() if f != 0]
+    correct = [f for f in correct.flatten() if f != padding_num]
 
     # 머릿글자
     correct = correct[1:]
@@ -277,13 +277,13 @@ def eval_transformer(model, question, correct, id_to_char, eos_id,
 
     # 문자열로 변환
     question = ' '.join([id_to_char[int(c)] for c in question.flatten() if c in id_to_char])
-    correct = ' '.join([id_to_char[int(c)] for c in correct])
+    correct = ' '.join([id_to_char[int(c)] for c in correct if c in id_to_char])
 
     eid = guess[np.where(guess==eos_id)]
     if len(eid) != 0:
         guess = guess[:eid[0]]
 
-    guess_str = ' '.join([id_to_char[int(c)] for c in guess])
+    guess_str = ' '.join([id_to_char[int(c)] for c in guess if c in id_to_char])
 
     if verbos:
         if is_reverse:
@@ -341,7 +341,7 @@ def analogy(a, b, c, word_to_id, id_to_word, word_matrix, top=5, answer=None):
 def normalize(x):
     if x.ndim == 2:
         s = np.sqrt((x * x).sum(1))
-        x /= s.reshape((s.shape[0], 1))
+        x =  x/s.reshape((s.shape[0], 1))
     elif x.ndim == 1:
         s = np.sqrt((x * x).sum())
         x /= s
@@ -387,4 +387,18 @@ def normalization(x):
             x[n] = (x[n]-x[n].mean())/x[n].std()
     elif x.ndim == 2:
         x = (x-x.mean())/x.std()
+    return x
+
+def removeeos(x, padding_num=0):
+    # x->N,T
+    N,T = x.shape
+    for n in range(N):
+        x[n][np.where(x[n]==padding_num)[0]-1] = padding_num
+    return x
+
+def removesos(x, padding_num=0):
+    # x->N,T
+    N, T = x.shape
+    for n in range(N):
+        x[n] = np.hstack((x[n, 1:], [padding_num]))
     return x

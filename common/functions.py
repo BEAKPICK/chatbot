@@ -19,9 +19,9 @@ def softmax(x):
     elif x.ndim == 3:
         N, _, _ = x.shape
         for n in range(N):
-            x[n] = x[n] - x[n].max(axis=1, keepdims=True)
+            x[n] = x[n] - x[n].max(axis=-1, keepdims=True)
             x[n] = np.exp(x[n])
-            x[n] = x[n]/x[n].sum(axis=1, keepdims=True)
+            x[n] = x[n]/x[n].sum(axis=-1, keepdims=True)
     elif x.ndim == 1:
         x = x - np.max(x)
         x = np.exp(x) / np.sum(np.exp(x))

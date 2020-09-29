@@ -2,9 +2,10 @@ import numpy as np
 
 from common.time_layers import TimeSoftmaxWithLoss
 from common.time_layers import PositionalEmbedding
+from common.time_layers import TimeDropout
+from common.time_layers import TimeAffine
 
 from common.layers import QueryKeyValueMatMul
-from common.layers import MatMul
 from common.layers import AddNorm
 from common.layers import FFNN
 
@@ -12,7 +13,7 @@ from common.base_model import BaseModel
 
 class ScaledDotAttention:
 
-    def __init__(self, wordvec_size, head_size, mask=False):
+    def __init__(self, wordvec_size, head_size):
         # S for vocab size(omit), D for wor'D'vector size, H for 'H'ead size
         D, H = wordvec_size, head_size
         rn = np.random.randn
@@ -21,26 +22,26 @@ class ScaledDotAttention:
         key_W = (rn(D, H) / np.sqrt(D)).astype('f')
         value_W = (rn(D, H) / np.sqrt(D)).astype('f')
 
-        self.querykeyvalue = QueryKeyValueMatMul(query_W, key_W, value_W, mask=mask)
+        self.querykeyvalue = QueryKeyValueMatMul(query_W, key_W, value_W)
 
         self.params = self.querykeyvalue.params
         self.grads = self.querykeyvalue.grads
 
-        return None
     # qk는 encoder로 부터 넘어온 값이 있을 때(qk parameter for decoder only)
-    def forward(self, xs, qk=None):
+    def forward(self, xs, kv=None, mask=False):
         # xs->N,(T,D), qkvs->N,(T,H)
-        qkvs = self.querykeyvalue.forward(xs, qk)
+        qkvs = self.querykeyvalue.forward(xs, kv=kv, mask=mask)
         return qkvs
 
     def backward(self, dz):
-        # dz->N,(T,H), dout->N,(T,D)
-        dout = self.querykeyvalue.backward(dz)
-        return dout
+        # dz->N,(T,H), dout1,2,3->N,(T,D)
+        dout1, dout2, dout3 = self.querykeyvalue.backward(dz)
+        # Query Key Value
+        return dout1, dout2, dout3
 
 class MultiHeadAttention:
 
-    def __init__(self, wordvec_size, head_size, num_heads, mask=False):
+    def __init__(self, wordvec_size, head_size, num_heads):
         D, H = wordvec_size, head_size
         rn = np.random.randn
 
@@ -50,8 +51,7 @@ class MultiHeadAttention:
         self.params, self.grads = [], []
         for _ in range(num_heads):
             layer = ScaledDotAttention(wordvec_size=D,
-                                       head_size=H,
-                                       mask=mask)
+                                       head_size=H)
             self.layers.append(layer)
             self.params.extend(layer.params)
             self.grads.extend(layer.grads)
@@ -68,60 +68,74 @@ class MultiHeadAttention:
         self.grads.append(np.zeros_like(self.W0))
 
     # decoder의 경우 qkW에 weight이 들어있다.
-    def forward(self, xs, qk=None):
+    def forward(self, xs, kv=None, mask=False):
         # xs->N,(T,D)
 
         # get forwards from multiple scaleddotattention
         fwds = []
         for layer in self.layers:
             # ScaledDotAttentionEncoder.forward()->N,(T,H)
-            fwds.append(layer.forward(xs, qk))
+            fwds.append(layer.forward(xs, kv=kv, mask=mask))
 
         # h_concat->N,(T,num_heads*H)
-        h_concat = np.concatenate([i for i in fwds], axis=2)
+        h_concat = np.concatenate([i for i in fwds], axis=-1)
         self.x = h_concat
+
 
         # w0->(num_heads*H, D)
         N,T,D = xs.shape
-        h_linear = np.empty((N,T,D), dtype='f')
+        h_concat = h_concat.reshape(N*T,-1)
 
-        for n in range(N):
-            h_linear[n] = np.dot(h_concat[n], self.W0)
+        h_linear = np.dot(h_concat, self.W0)
+        h_linear = h_linear.reshape((N,T,D))
 
         # h_linear->(N,T,D)
         return h_linear
 
-    def backward(self, dout):
+    def backward(self, dout, querykvsep=False):
         # dout->N,(T,D), self.x->N,(T,num_heads*H)
-        N,_,_ = dout.shape
+        N,T,_ = dout.shape
         # dW0->N,(num_heads*H, D)
-        dW0 = np.matmul(np.transpose(self.x, (0,2,1)), dout)
+        dout = dout.reshape((N*T,-1))
+        self.x = self.x.reshape((N*T,-1))
+        dW0 = np.dot(self.x.T, dout)
         # W0의 grads는 가장 마지막에 있다.
-        self.grads[-1][...] = np.nansum(dW0, axis=0)
+        self.grads[-1][...] = dW0 / N
 
-        # dout->N,(T,D) / w0->(num_heads*H, D)
-        dx = np.matmul(dout, self.W0.T)
+        # dout->(N*T,D) / w0->(num_heads*H, D)
+        dx = np.dot(dout, self.W0.T)
+        dx = dx.reshape((N,T,-1))
+        dout = dout.reshape((N,T,-1))
         # dx->N,(T,num_heads*H)
 
         # dx를 head_size씩 num_heads만큼 잘라 각 ScaledDotAttention에 넘겨준다.
+        # 넘겨주고 받아온 Query Key Value에서 QK와 V따로 전파여부를 검사
+        # QK와 V를 따로 분리하지 않을 시 리턴되는 두 값은 같다.
         cursor = 0
         ix = np.zeros_like(dout)
+        ix2 = np.zeros_like(dout)
         for layer in self.layers:
-            ix += layer.backward(dx[:,:,cursor:cursor+self.head_size])
+            dx1, dx2, dx3 = layer.backward(dx[:, :, cursor:cursor + self.head_size])
+            if querykvsep:
+                ix += dx2+dx3
+                ix2 += dx1
+            else:
+                ix += dx1+dx2+dx3
+                ix2 += dx1+dx2+dx3
             cursor+=self.head_size
-        # self.embed.backward(ix/len(self.layers)) ->참고후 삭제
 
-        return ix/len(self.layers)
+        return ix, ix2
 
 class TransformerEncoder:
-    def __init__(self, wordvec_size, head_size, num_heads, d_ffnn=64):
+    def __init__(self, wordvec_size, head_size, num_heads, batch_size, d_ffnn=64, dropout=0.4):
         D, H = wordvec_size, head_size
         rn = np.random.randn
         self.multiheadattention = MultiHeadAttention(wordvec_size=wordvec_size,
                                                      head_size=head_size,
                                                      num_heads=num_heads)
-
-        self.addnorm1 = AddNorm((rn(D,D)/np.sqrt(D)).astype('f'))
+        # self.dropout = TimeDropout(dropout_ratio=dropout)
+        # self.addnorm1 = AddNorm()
+        self.addnorm1 = AddNorm((rn(batch_size)/np.sqrt(batch_size)).astype('f'), np.zeros(batch_size).astype('f'))
 
         ffnn_W1 = (rn(D,d_ffnn)/np.sqrt(D)).astype('f')
         ffnn_W2 = (rn(d_ffnn, D) / np.sqrt(d_ffnn)).astype('f')
@@ -129,7 +143,8 @@ class TransformerEncoder:
         ffnn_b2 = np.zeros(D).astype('f')
         self.ffnn = FFNN(ffnn_W1, ffnn_b1, ffnn_W2, ffnn_b2)
 
-        self.addnorm2 = AddNorm((rn(D,D)/np.sqrt(D)).astype('f'))
+        # self.addnorm2 = AddNorm()
+        self.addnorm2 = AddNorm((rn(batch_size)/np.sqrt(batch_size)).astype('f'), np.zeros(batch_size).astype('f'))
 
         self.params = self.multiheadattention.params + self.ffnn.params \
                       + self.addnorm1.params + self.addnorm2.params
@@ -153,10 +168,17 @@ class TransformerEncoder:
         an2dx = self.addnorm2.backward(dout)
         # an2dx->N,(T,D)
         fdx = self.ffnn.backward(an2dx)
+
+        # feed forward covered with resnet(addnorm)
+        fdx+=np.ones_like(fdx)
         # fdx->N,(T,D)
         an1dx = self.addnorm1.backward(fdx)
         # an1dx->N,(T,D)
-        mdx = self.multiheadattention.backward(an1dx)
+        _, mdx = self.multiheadattention.backward(an1dx)
+
+        # multiheadattention covered with resnet(addnorm)
+        mdx+=np.ones_like(mdx)
+
         # mdx->N,(T,D)
         return mdx
 
@@ -164,58 +186,71 @@ class TransformerEncoder:
         return self.forward(xs)
 
 class TransformerDecoder:
-    def __init__(self, wordvec_size, head_size, num_heads, d_ffnn=64):
+    def __init__(self, wordvec_size, head_size, num_heads, batch_size, d_ffnn=64, dropout_ratio=0):
         D, H = wordvec_size, head_size
         rn = np.random.randn
 
-        self.maskedmultiheadattention = MultiHeadAttention(wordvec_size=D,
-                                                           head_size=H,
-                                                           num_heads=num_heads,
-                                                           mask=True)
-        self.addnorm1 = AddNorm((rn(D, D) / np.sqrt(D)).astype('f'))
+        # self.dropout1 = TimeDropout(dropout_ratio=dropout_ratio)
         # decoder의 multiheadattention는 input을 encoder로 부터 받는다.
         self.multiheadattention = MultiHeadAttention(wordvec_size=D,
                                                      head_size=H,
                                                      num_heads=num_heads)
-        self.addnorm2 = AddNorm((rn(D, D) / np.sqrt(D)).astype('f'))
+
+        # self.addnorm1 = AddNorm()
+        self.addnorm1 = AddNorm((rn(batch_size) / np.sqrt(batch_size)).astype('f'), np.zeros(batch_size).astype('f'))
+
+        # self.addnorm2 = AddNorm()
+        self.addnorm2 = AddNorm((rn(batch_size) / np.sqrt(batch_size)).astype('f'), np.zeros(batch_size).astype('f'))
+
+        # self.dropout2 = TimeDropout(dropout_ratio=dropout_ratio)
         ffnn_W1 = (rn(D, d_ffnn) / np.sqrt(D)).astype('f')
         ffnn_W2 = (rn(d_ffnn, D) / np.sqrt(d_ffnn)).astype('f')
         ffnn_b1 = np.zeros(d_ffnn).astype('f')
         ffnn_b2 = np.zeros(D).astype('f')
         self.ffnn = FFNN(ffnn_W1, ffnn_b1, ffnn_W2, ffnn_b2)
 
-        self.addnorm3 = AddNorm((rn(D, D) / np.sqrt(D)).astype('f'))
+        # self.addnorm3 = AddNorm()
+        self.addnorm3 = AddNorm((rn(batch_size) / np.sqrt(batch_size)).astype('f'), np.zeros(batch_size).astype('f'))
 
-        self.params = self.maskedmultiheadattention.params + self.ffnn.params \
+        self.params = self.multiheadattention.params + self.ffnn.params \
                       + self.addnorm1.params + self.addnorm2.params + self.addnorm3.params
-        self.grads = self.maskedmultiheadattention.grads + self.ffnn.grads \
+        self.grads = self.multiheadattention.grads + self.ffnn.grads \
                      + self.addnorm1.grads + self.addnorm2.grads + self.addnorm3.grads
 
-        return None
-    def forward(self, xs, qk):
+    def forward(self, xs, kv):
         # mmx->N,(T,D)
-        mmx = self.maskedmultiheadattention.forward(xs)
+        mmx = self.multiheadattention.forward(xs, mask=True)
         # an1x->N,(T,D)
         an1x = self.addnorm1.forward(xs, mmx)
         # mx->N,(T,D)
-        mx = self.multiheadattention.forward(an1x, qk)
+        mx = self.multiheadattention.forward(an1x, kv=kv)
         # an2x->N,(T,D)
         an2x = self.addnorm2.forward(mx, an1x)
         # fx->N,(T,D)
         fx = self.ffnn.forward(an2x)
         # an3x->N,(T,D)
         an3x = self.addnorm3.forward(fx, an2x)
+
         return an3x
 
     def backward(self, dout):
         # dout->N,(T,D)
         dout = self.addnorm3.backward(dout)
+        # TimeDropout()
         dout = self.ffnn.backward(dout)
+
+        # feed forward covered with resnet(addnorm)
+        dout+=np.ones_like(dout)
         dout = self.addnorm2.backward(dout)
         # ddout->N,(T,D)
-        ddout = self.multiheadattention.backward(dout)
-        dout = self.addnorm1.backward(ddout)
-        dout = self.maskedmultiheadattention.backward(dout)
+        ddout, dout = self.multiheadattention.backward(dout, querykvsep=True)
+
+        # multiheadattention covered with resnet(addnorm)
+        # but ddout will be backpropagated without resnet(addnorm)
+        dout = self.addnorm1.backward(dout+np.ones_like(dout))
+        _, dout = self.multiheadattention.backward(dout)
+
+        dout+=np.ones_like(dout)
 
         return ddout, dout
 
@@ -223,7 +258,7 @@ class TransformerDecoder:
         # xs->1,(T,D)
         # xs = xs[np.newaxis, :]
         # mmx->1,(T,D)
-        mmx = self.maskedmultiheadattention.forward(xs)
+        mmx = self.multiheadattention.forward(xs, mask=True)
         # an1x->1,(T,D)
         an1x = self.addnorm1.forward(xs, mmx)
         # fx->1,(T,D)
@@ -234,16 +269,20 @@ class TransformerDecoder:
 
 
 class Transformer(BaseModel):
-    def __init__(self, vocab_size, wordvec_size, head_size, num_heads, num_encoders=3, num_decoders=3):
+    def __init__(self, vocab_size, wordvec_size, head_size, num_heads, batch_size, num_encoders=3, num_decoders=3, dropout_ratio=0,
+                 padding_num=0):
+        super().__init__()
         S, D, H = vocab_size, wordvec_size, head_size
         rn = np.random.randn
 
         self.num_encoders = num_encoders
         self.num_decoders = num_decoders
         self.params, self.grads =[],[]
+        self.dropout_ratio = dropout_ratio
 
         # Double embed (encoder, decoder)
         embed_W1 = (rn(S, D) / 100).astype('f')
+        embed_W1[padding_num] = 0
         self.e_embed = PositionalEmbedding(embed_W1)
         self.params+=self.e_embed.params
         self.grads+=self.e_embed.grads
@@ -251,8 +290,9 @@ class Transformer(BaseModel):
         self.encoders, self.decoders = [], []
         for _ in range(num_encoders):
             te = TransformerEncoder(wordvec_size=D,
-                                   head_size=H,
-                                   num_heads=num_heads)
+                                    head_size=H,
+                                    num_heads=num_heads,
+                                    batch_size=batch_size)
             self.encoders.append(te)
             self.params+=te.params
             self.grads+=te.grads
@@ -260,18 +300,19 @@ class Transformer(BaseModel):
         for _ in range(num_decoders):
             td = TransformerDecoder(wordvec_size=D,
                                     head_size=H,
-                                    num_heads=num_heads)
+                                    num_heads=num_heads,
+                                    batch_size=batch_size)
             self.decoders.append(td)
             self.params+=td.params
             self.grads+=td.grads
 
         # 편의를 위해 linear 변수에 따로 weight 저장
-        self.linear = MatMul((rn(D, S)/np.sqrt(D)).astype('f'))
+        self.linear = TimeAffine((rn(D, S)/np.sqrt(D)).astype('f'), np.zeros(S).astype('f'))
         self.params+=self.linear.params
         self.grads+=self.linear.grads
         
         # TimeSoftmaxWithLoss도 params와 grads가 있으나 사용되지 않기때문에 생략
-        self.softmax = TimeSoftmaxWithLoss(ignore_label=-1)
+        self.softmax = TimeSoftmaxWithLoss(ignore_label=padding_num)
 
     def forward(self, xs, ts):
         # xs->(N,T) / eout, dout, ts->N,(T,D)
@@ -282,15 +323,12 @@ class Transformer(BaseModel):
         for encoder in self.encoders:
             eout = encoder.forward(eout)
         for decoder in self.decoders:
-            ts = decoder.forward(dout, eout)
+            dout = decoder.forward(dout, eout)
 
-        ts = ts.reshape(N*T,D)
         # score->(N*T,S)
-        score = self.linear.forward(ts)
-        _,S = score.shape
+        score = self.linear.forward(dout)
         # 순서 주의 score는 linear된 2차원 행렬, xs는 임베딩되기전 2차원 행렬
         # loss->(N*T,1)
-        score = score.reshape(N,T,S)
         loss = self.softmax.forward(score, xs)
         return loss
 
@@ -298,20 +336,21 @@ class Transformer(BaseModel):
         # dout->N,(T,S)
         dout = self.softmax.backward(dout)
         N,T,S = dout.shape
-        dout = dout.reshape(N*T,S)
-        # dout->(N*T,S) / self.linear.W->(D,S)
+        # self.linear.W->(D,S)
         dout = self.linear.backward(dout)
-        # dout->(N*T,D)
-        _,D = dout.shape
-        dout = dout.reshape(N,T,D)
+        # dout-> N,(T,D)
+        _,_,D = dout.shape
 
         # ddout->N,(T,D)
-        for i in range(self.num_decoders-1,0,-1):
-            _, dout = self.decoders[i].backward(dout)
-        ddout, dout = self.decoders[0].backward(dout)
+        ddoutx = np.zeros((N,T,D), dtype='f')
+
+        for i in range(self.num_decoders-1,-1,-1):
+            ddout, dout = self.decoders[i].backward(dout)
+            ddoutx += ddout
 
         # dout->N,(T,D)
-        for i in range(self.num_encoders-1, -1, -1):
+        ddout = self.encoders[-1].backward(ddoutx)
+        for i in range(self.num_encoders-2, -1, -1):
             ddout = self.encoders[i].backward(ddout)
 
         self.e_embed.backward(ddout)
@@ -322,13 +361,14 @@ class Transformer(BaseModel):
         if type == 'GPT':
             # xs->(T,), out->(T,D)
             out = self.e_embed.forward(xs)
+
             # out->(1,T,D)
             # out = out[np.newaxis,:]
             for i in range(self.num_decoders):
                 out = self.decoders[i].generate(out)
             # out->(1,T,D)
-            N, T, D = out.shape
-            out = out.reshape(N * T, D)
+            # N, T, D = out.shape
+            # out = out.reshape(N * T, D)
             # score->(1,T,S)
             score = self.linear.forward(out)
 

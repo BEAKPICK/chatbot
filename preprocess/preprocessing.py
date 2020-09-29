@@ -29,7 +29,7 @@ def divide_test_train(data, test_rate=0.2):
     return test, train
 
 # bind id with whole words in corpus
-def bind_id_all(qdata, adata):
+def bind_id_all(qdata, adata, padding_num):
 
     tdata = qdata+adata
     max_len = max(len(item) for item in tdata)
@@ -38,9 +38,6 @@ def bind_id_all(qdata, adata):
     words = list(set(words)) #remove duplication
     counts = Counter(words)
     sorted_keys = sorted(counts.items(), key=lambda x:x[1], reverse=True)
-
-    word_to_id[''] = -1
-    id_to_word[-1] = ''
 
     idx=1
     for i,d in sorted_keys:
@@ -91,7 +88,7 @@ def encode(input_str, size):
 # scaled_size option is for seq2seq
 # sos = start of sentence, eos = end of sentence
 def load_data(file_name='../dataset/ChatbotData.csv', seed=1995, need_soseos=False, need_corpus=False,
-              scaled_size=True, padding_num=-1, save=True, save_file_name='./pkl/qadf.pkl', time_size=35):
+              scaled_size=True, padding_num=0, save=True, save_file_name='./pkl/qadf.pkl', time_size=35):
     random.seed(seed)
     # get_external_stopwords()
 
@@ -121,7 +118,7 @@ def load_data(file_name='../dataset/ChatbotData.csv', seed=1995, need_soseos=Fal
     print("file parsed")
 
     #원래 encoder, decoder 각각 max_len을 따로 정하지만 여기서는 일상대화를 다루므로 같이 진행하였다.
-    word_to_id, id_to_word, max_len = bind_id_all(qdf, adf)
+    word_to_id, id_to_word, max_len = bind_id_all(qdf, adf, padding_num)
 
     if max_len < time_size:
         max_len = time_size

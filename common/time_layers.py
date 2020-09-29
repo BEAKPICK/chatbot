@@ -226,7 +226,8 @@ class TimeLSTM:
 
 
 class TimeEmbedding:
-    def __init__(self, W):
+    def __init__(self, W, padding_num=0):
+        self.padding_num = padding_num
         self.params = [W]
         self.grads = [np.zeros_like(W)]
         self.layers = None
@@ -240,7 +241,7 @@ class TimeEmbedding:
         self.layers = []
 
         for t in range(T):#시간설정한 만큼 루프
-            layer = Embedding(self.W)
+            layer = Embedding(self.W, padding_num=self.padding_num)
             out[:, t, :] = layer.forward(xs[:, t])#예를 들은 1,3,8형태에서 8부분을 가져오는 것
             self.layers.append(layer)
 
@@ -294,7 +295,7 @@ class TimeAffine:
 
 
 class TimeSoftmaxWithLoss:
-    def __init__(self, ignore_label=-1):
+    def __init__(self, ignore_label=0):
         self.params, self.grads = [], []
         self.cache = None
         self.ignore_label = ignore_label
@@ -621,8 +622,8 @@ class Simple_TimeAffine:
         return dxs
 
 class PositionalEmbedding(TimeEmbedding):
-    def __init__(self, d):
-        super().__init__(d)
+    def __init__(self, d, padding_num=0):
+        super().__init__(d, padding_num)
 
     def forward(self, xs):
         N = 1
@@ -642,16 +643,19 @@ class PositionalEmbedding(TimeEmbedding):
         self.layers = []
 
         for t in range(T):
-            layer = Embedding(self.W)
+            layer = Embedding(self.W, padding_num=self.padding_num)
             out[:, t, :] = layer.forward(xs[:, t])
             self.layers.append(layer)
-
+        mask = out!=self.padding_num
         # embedding이 끝나면 pos_encoding을 진행한다.
         # 첫번쨰 문장만 계산하고 그 값을 나머지에 모두 활용한다.
         pos_E = pos_Encoding(out[0,:,:])
 
         for n in range(N):
             out[n, :, :] += pos_E
+
+        # padding인 부분은 0으로 masking처리 해준다.
+        out*=mask
 
         return out
 

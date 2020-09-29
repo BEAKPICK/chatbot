@@ -319,7 +319,8 @@ class TimeSoftmaxWithLoss:
         # ys[np.where(ys==0)] = 1e-5
 
         # ys->(N*T,S) / mask->(N*T,S)
-        ls = np.log(ys[np.arange(N * T), ts])
+        eps = 1e-5
+        ls = np.log(ys[np.arange(N * T), ts]+eps)
         ls *= mask  # ignore_label에 해당하는 데이터는 손실을 0으로 설정
 
         # sum->nansum으로 변경

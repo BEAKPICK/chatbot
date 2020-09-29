@@ -424,69 +424,79 @@ class AddNorm:
             self.means.append(np.mean(x))
 
         # self.stds = np.array(self.stds)
-        self.means = np.array(self.means)
+        # self.means = np.array(self.means)
         # self.ivar = 1./self.stds
         self.norm = normalization(x_out)
 
+        # scale and shift
         for n in range(N):
             x_out[n] = (self.norm[n] * aW[n]) + ab[n]
+
         # x_out->N,(T,D)
-        # x_out = np.matmul(x_out, aW)
+        # x_out = np.matmul(x_out, aW) + ab
+
         # x_out->N,(T,D)
         return x_out
 
 
     def backward(self, dout):
         # https://kimcando94.tistory.com/110
-        # http://cthorey.github.io./backpropagation/ 를 참고하여 작성됨
-
+        # http://cthorey.github.io./backpropagation/
+        # https://wiseodd.github.io/techblog/2016/07/04/batchnorm/ 를 참고하여 작성됨
+        aW = self.params[0]
         # dout->N,(T,D)
         N, T, D = dout.shape
-        # aW, ab->(D,)
-        aW = self.params[0]
         db = np.sum(dout, axis=(1,2))
 
-        dW = np.empty(*aW.shape, dtype='f')
+        dW = np.empty(aW.shape, dtype='f')
         for n in range(N):
             dW[n] = np.sum(dout[n]*self.norm[n])
-        # dW = dW/N
 
         self.grads[0][...] = dW
         self.grads[1][...] = db
 
-        # dxhat = np.empty(N)
-        # for n in range(N):
-        #     dxhat[n] = dout[n] * aW[n]
-        # divar = np.empty(N)
-        # for n in range(N):
-        #     divar[n] = dxhat[n]*self.means[n]
+        x_mu = np.empty(dout.shape, dtype='f')
+        for n in range(N):
+            x_mu[n] = self.x[n] - self.means[n]
+        dx_norm = np.empty(dout.shape, dtype='f')
+        for n in range(N):
+            dx_norm[n] = dout[n] * aW[n]
+        dvar = np.empty(N, dtype='f')
+        for n in range(N):
+            dvar[n] = np.sum(dx_norm[n] * x_mu[n]) * -.5 * (1./self.stds[n])**3
+        dmu = np.empty(N, dtype='f')
+        for n in range(N):
+            dmu[n] = np.sum(dx_norm[n] * (-1./self.stds[n])) + dvar[n] * np.mean(-2. * x_mu[n])
+        dx = np.empty(dout.shape, dtype='f')
+        for n in range(N):
+            dx[n] = (dx_norm[n] * (1./self.stds[n])) + (dvar[n] * 2 * x_mu[n] / N) + (dmu[n] / N)
 
-        # dxmu1 = dxhat * self.ivar
-        # dsqrtvar = -1. / (self.stds**2) * divar
-        # dvar = 0.5 * 1. / self.stds * dsqrtvar
-        # dsq = 1. /N * np.ones((N,T,D)) * dvar
+        return dx
 
         # dout = dout.reshape((N*T,-1))
         # dout->(N*T,D)
-        # aW, = self.params
+
         # self.x->(N*T,D)
-        # self.x = self.x.reshape((N*T,-1))
+        '''self.x = self.x.reshape((N*T,-1))'''
         # aW->(D,D) / daW->(D,D)
         # daW = np.dot(self.x.T, dout)
+
         # dxhat->(N*T,D)
         # dxhat = np.dot(dout, aW.T)
-
         # dxhat = dxhat.reshape((N,T,-1))
-        # self.x = self.x.reshape((N,T,-1))
-        # dout = dout.reshape((N,T,-1))
+
+        '''self.x = self.x.reshape((N,T,-1))'''
+        '''dout = dout.reshape((N,T,-1))'''
 
         # self.grads[0][...] = daW / N
+        # self.grads[1][...] = db
 
-        for n in range(N):
+        '''for n in range(N):
             # dout[n] = dout[n] / self.stds[n]
-            # dout[n] = (1./N) * (1/self.stds[n]) * (N*dout[n] - np.nansum(dout[n], axis=0)
-            #                                       - self.x[n]*np.nansum(dout[n]*self.x[n], axis=0))
-            dout[n] = (1. / N) * aW[n] * (1 / self.stds[n]) * (N * dout[n] - np.nansum(dout[n], axis=0)
+            # dout[n] = (1./N) * (1/self.stds[n]) * (N*dout[n] - np.nansum(dout[n])
+            #                                       - self.x[n]*np.nansum(dout[n]*self.x[n]))
+
+            dout[n] = (1. / N) * aW[n] * (1. / self.stds[n]) * (N * dout[n] - np.nansum(dout[n])
                                                 - (self.x[n] - self.means[n]) * ((1. / self.stds[n]) ** 2)
-                                                * np.nansum(dout[n] * (self.x[n] - self.means[n]), axis=0))
-        return dout
+                                                * np.nansum(dout[n] * (self.x[n] - self.means[n])))
+        return dout'''

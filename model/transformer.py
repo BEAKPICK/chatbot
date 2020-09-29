@@ -1,5 +1,7 @@
 import numpy as np
 
+from common.util import removesos, removeeos
+
 from common.time_layers import TimeSoftmaxWithLoss
 from common.time_layers import PositionalEmbedding
 from common.time_layers import TimeDropout
@@ -155,29 +157,32 @@ class TransformerEncoder:
         # xs->N,(T,D)
         mx = self.multiheadattention.forward(xs)
         # mx->N,(T,D)
-        an1x = self.addnorm1.forward(mx, xs)
+        # an1x = self.addnorm1.forward(mx, xs)
         # an1x->N,(T,D)
-        fx = self.ffnn.forward(an1x)
+        fx = self.ffnn.forward(mx)
+        # fx = self.ffnn.forward(an1x)
         # fx->N,(T,D)
-        an2x = self.addnorm2.forward(fx, an1x)
+        # an2x = self.addnorm2.forward(fx, an1x)
 
-        return an2x
+        return fx
 
     def backward(self, dout):
         # dout->N,(T,D)
-        an2dx = self.addnorm2.backward(dout)
+        # an2dx = self.addnorm2.backward(dout)
         # an2dx->N,(T,D)
-        fdx = self.ffnn.backward(an2dx)
+        fdx = self.ffnn.backward(dout)
+        # fdx = self.ffnn.backward(an2dx)
 
         # feed forward covered with resnet(addnorm)
-        fdx+=np.ones_like(fdx)
+        # fdx+=np.ones_like(fdx)
         # fdx->N,(T,D)
-        an1dx = self.addnorm1.backward(fdx)
+        # an1dx = self.addnorm1.backward(fdx)
         # an1dx->N,(T,D)
-        _, mdx = self.multiheadattention.backward(an1dx)
+        _, mdx = self.multiheadattention.backward(fdx)
+        # _, mdx = self.multiheadattention.backward(an1dx)
 
         # multiheadattention covered with resnet(addnorm)
-        mdx+=np.ones_like(mdx)
+        # mdx+=np.ones_like(mdx)
 
         # mdx->N,(T,D)
         return mdx
@@ -220,37 +225,44 @@ class TransformerDecoder:
     def forward(self, xs, kv):
         # mmx->N,(T,D)
         mmx = self.multiheadattention.forward(xs, mask=True)
-        # an1x->N,(T,D)
-        an1x = self.addnorm1.forward(xs, mmx)
-        # mx->N,(T,D)
-        mx = self.multiheadattention.forward(an1x, kv=kv)
-        # an2x->N,(T,D)
-        an2x = self.addnorm2.forward(mx, an1x)
-        # fx->N,(T,D)
-        fx = self.ffnn.forward(an2x)
-        # an3x->N,(T,D)
-        an3x = self.addnorm3.forward(fx, an2x)
 
-        return an3x
+        # an1x->N,(T,D)
+        # an1x = self.addnorm1.forward(xs, mmx)
+
+        # mx->N,(T,D)
+        mx = self.multiheadattention.forward(mmx, kv=kv)
+        # mx = self.multiheadattention.forward(an1x, kv=kv)
+
+        # an2x->N,(T,D)
+        # an2x = self.addnorm2.forward(mx, an1x)
+
+        # fx->N,(T,D)
+        fx = self.ffnn.forward(mx)
+        # fx = self.ffnn.forward(an2x)
+
+        # an3x->N,(T,D)
+        # an3x = self.addnorm3.forward(fx, an2x)
+
+        return fx
 
     def backward(self, dout):
         # dout->N,(T,D)
-        dout = self.addnorm3.backward(dout)
+        # dout = self.addnorm3.backward(dout)
         # TimeDropout()
         dout = self.ffnn.backward(dout)
 
         # feed forward covered with resnet(addnorm)
-        dout+=np.ones_like(dout)
-        dout = self.addnorm2.backward(dout)
+        # dout+=np.ones_like(dout)
+        # dout = self.addnorm2.backward(dout)
         # ddout->N,(T,D)
         ddout, dout = self.multiheadattention.backward(dout, querykvsep=True)
 
         # multiheadattention covered with resnet(addnorm)
         # but ddout will be backpropagated without resnet(addnorm)
-        dout = self.addnorm1.backward(dout+np.ones_like(dout))
+        # dout = self.addnorm1.backward(dout+np.ones_like(dout))
         _, dout = self.multiheadattention.backward(dout)
 
-        dout+=np.ones_like(dout)
+        # dout+=np.ones_like(dout)
 
         return ddout, dout
 
@@ -315,9 +327,10 @@ class Transformer(BaseModel):
         self.softmax = TimeSoftmaxWithLoss(ignore_label=padding_num)
 
     def forward(self, xs, ts):
+        decoder_xs, decoder_ts = removeeos(ts), removesos(ts)
         # xs->(N,T) / eout, dout, ts->N,(T,D)
         eout = self.e_embed.forward(xs)
-        dout = self.e_embed.forward(ts)
+        dout = self.e_embed.forward(decoder_xs)
         N, T, D = eout.shape
 
         for encoder in self.encoders:
@@ -329,7 +342,7 @@ class Transformer(BaseModel):
         score = self.linear.forward(dout)
         # 순서 주의 score는 linear된 2차원 행렬, xs는 임베딩되기전 2차원 행렬
         # loss->(N*T,1)
-        loss = self.softmax.forward(score, xs)
+        loss = self.softmax.forward(score, decoder_ts)
         return loss
 
     def backward(self, dout=1):

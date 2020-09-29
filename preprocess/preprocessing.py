@@ -48,7 +48,7 @@ def bind_id_all(qdata, adata, padding_num):
     return word_to_id, id_to_word, max_len
 
 # parameter target_data[[]]
-# padding 0 for post only
+# padding for post only
 def convert_data(target_data, size=10, scaled_size=True, padding='post', padding_num = 0):
     result = []
     tmp = []
@@ -125,8 +125,10 @@ def load_data(file_name='../dataset/ChatbotData.csv', seed=1995, need_soseos=Fal
 
     print("id binded")
 
-    enc_q = convert_data(qdf, size=max_len, scaled_size=scaled_size, padding='post', padding_num=padding_num)
-    enc_a = convert_data(adf, size=max_len, scaled_size=scaled_size, padding='post', padding_num=padding_num)
+    enc_q = convert_data(qdf, size=max_len, scaled_size=scaled_size, padding='post',
+                         padding_num=padding_num)
+    enc_a = convert_data(adf, size=max_len, scaled_size=scaled_size, padding='post',
+                         padding_num=padding_num)
 
     print("words converted to ids")
 

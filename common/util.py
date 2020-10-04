@@ -390,15 +390,17 @@ def normalization(x):
     return x
 
 def removeeos(x, padding_num=0):
+    tmpx = x.copy()
     # x->N,T
-    N,T = x.shape
+    N,T = tmpx.shape
     for n in range(N):
-        x[n][np.where(x[n]==padding_num)[0]-1] = padding_num
-    return x
+        tmpx[n][np.where(tmpx[n]==padding_num)[0]-1] = padding_num
+    return tmpx
 
 def removesos(x, padding_num=0):
+    tmpx = x.copy()
     # x->N,T
-    N, T = x.shape
+    N, T = tmpx.shape
     for n in range(N):
-        x[n] = np.hstack((x[n, 1:], [padding_num]))
-    return x
+        tmpx[n] = np.hstack((tmpx[n, 1:], [padding_num]))
+    return tmpx

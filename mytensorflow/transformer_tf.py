@@ -3,9 +3,32 @@ clone coding
 https://wikidocs.net/31379
 '''
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
+from tensorflow.keras.callbacks import EarlyStopping
+
+from preprocess import preprocessing
+from common.util import removesos, removeeos
+
+MAX_LENGTH = 35
+padding_num = 0
+
+epoch = 20
+
+if os.path.isfile("../pkl/myTransformer_preprocess.pkl"):
+    x_train, t_train = preprocessing.load_preprocess('../pkl/myTransformer_preprocess.pkl')
+else:
+    x_train, t_train = preprocessing.load_data(file_name="../dataset/ChatbotData.csv",
+                                               need_soseos=True,
+                                               save_file_name='../pkl/myTransformer_preprocess.pkl',
+                                               time_size=MAX_LENGTH,
+                                               padding_num=padding_num)
+
+# divide data
+x_test, x_train = preprocessing.divide_test_train(x_train, test_rate=0.1)
+t_test, t_train = preprocessing.divide_test_train(t_train, test_rate=0.1)
 
 class PositionalEncoding(tf.keras.layers.Layer):
     def __init__(self, position, d_model):
@@ -191,6 +214,11 @@ def encoder(vocab_size, num_layers, dff,
                                 dropout=dropout, name="encoder_layer_{}".format(i),
                                 )(inputs=[outputs, padding_mask])
 
+    return tf.keras.Model(
+        inputs=[inputs, padding_mask],
+        outputs=outputs,
+        name=name)
+
 def create_look_ahead_mask(x):
     seq_len = tf.shape(x)[1]
     look_ahead_mask = 1 - tf.linalg.band_part(tf.ones((seq_len, seq_len)), -1, 0)
@@ -296,27 +324,15 @@ def transformer(vocab_size, num_layers, dff,
         name='dec_padding_mask')(inputs)
 
     enc_outputs = encoder(vocab_size=vocab_size, num_layers=num_layers, dff=dff,
-                          d_model=d_model, num_heads=num_heads, dropout=dropout,
+                          d_model=d_model, num_heads=num_heads, dropout=dropout
                           )(inputs=[inputs, enc_padding_mask])  # 인코더의 입력은 입력 문장과 패딩 마스크
 
     dec_outputs = decoder(vocab_size=vocab_size, num_layers=num_layers, dff=dff,
-                          d_model=d_model, num_heads=num_heads, dropout=dropout,
+                          d_model=d_model, num_heads=num_heads, dropout=dropout
                           )(inputs=[dec_inputs, enc_outputs, look_ahead_mask, dec_padding_mask])
 
     outputs = tf.keras.layers.Dense(units=vocab_size, name="outputs")(dec_outputs)
     return tf.keras.Model(inputs=[inputs, dec_inputs], outputs=outputs, name=name)
-
-small_transformer = transformer(
-    vocab_size = 9000,
-    num_layers = 4,
-    dff = 512,
-    d_model = 128,
-    num_heads = 4,
-    dropout = 0.3,
-    name="small_transformer")
-
-tf.keras.utils.plot_model(
-    small_transformer, to_file='small_transformer.png', show_shapes=True)
 
 def loss_function(y_true, y_pred):
     y_true = tf.reshape(y_true, shape=(-1, MAX_LENGTH - 1))
@@ -343,8 +359,70 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
 
         return tf.math.rsqrt(self.d_model) * tf.math.minimum(arg1, arg2)
 
-sample_learning_rate = CustomSchedule(d_model=128)
+def seq2text(input_seq):
+    result = ''
+    for i in list(input_seq):
+        if i == 0:
+            continue
+        result += preprocessing.id_to_word[i]
+        result += ' '
+    return result
 
+
+small_transformer = transformer(
+    vocab_size = len(preprocessing.id_to_word),
+    num_layers = 4,
+    dff = 512,
+    d_model = 100,
+    num_heads = 4,
+    dropout = 0.3,
+    name="small_transformer")
+
+
+small_transformer.compile(optimizer='Adam', loss='sparse_categorical_crossentropy')
+es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=0.1)
+
+t_train_rmeos = removeeos(t_train)
+t_train_rmsos = removesos(t_train)
+t_test_rmeos = removeeos(t_test)
+t_test_rmsos = removesos(t_test)
+
+history = small_transformer.fit([x_train, t_train_rmeos], t_train_rmsos.reshape(t_train.shape[0], t_train.shape[1]),
+                                epochs = epoch, callbacks=[], batch_size=256,
+                                validation_data=([x_test, t_test_rmeos], t_test_rmsos.reshape(t_test.shape[0], t_test.shape[1])))
+
+for t in range(10):
+    print('Q ', seq2text(np.ravel(x_test[t])))
+    print('A ', seq2text(np.ravel(t_test[t])))
+    print('M ', end='')
+    selected = tf.argmax(small_transformer.predict([x_test[t], removeeos(t_test_rmsos)[t]]), axis=2)
+    selected = [i[0] for i in np.array(selected)]
+    for n in selected:
+        print(preprocessing.id_to_word[n], sep=' ', end='')
+    print('\n----')
+
+
+# print_num = 5
+# for i in range(print_num):
+#     print('------------------------------------------------')
+#     print('Q ', seq2text(np.ravel(x_test[i:i+1])))
+#     print('A ', seq2text(np.ravel(t_test[i:i+1])[1:]))
+#     print('M ', decode_sequence(astf.x_test[i:i+1, :]))
+# print('------------------------------------------------')
+
+small_transformer.save_weights('myTransformer_params')
+
+# if you need visualization
+plt.plot(history.history['loss'], label='train_loss')
+plt.plot(history.history['val_loss'], label='val_loss')
+plt.legend()
+plt.show()
+
+# 전체 모델의 구성도 그리기
+tf.keras.utils.plot_model(
+    small_transformer, to_file='small_transformer.png', show_shapes=True)
+
+sample_learning_rate = CustomSchedule(d_model=128)
 plt.plot(sample_learning_rate(tf.range(200000, dtype=tf.float32)))
 plt.ylabel("Learning Rate")
 plt.xlabel("Train Step")

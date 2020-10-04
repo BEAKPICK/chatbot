@@ -288,8 +288,8 @@ class TimeAffine:
         dx = np.dot(dout, W.T)
         dx = dx.reshape(*x.shape)
 
-        self.grads[0][...] = dW
-        self.grads[1][...] = db
+        self.grads[0][...] = dW / N
+        self.grads[1][...] = db / N
 
         return dx
 
@@ -647,6 +647,7 @@ class PositionalEmbedding(TimeEmbedding):
             layer = Embedding(self.W, padding_num=self.padding_num)
             out[:, t, :] = layer.forward(xs[:, t])
             self.layers.append(layer)
+
         mask = out!=self.padding_num
         # embedding이 끝나면 pos_encoding을 진행한다.
         # 첫번쨰 문장만 계산하고 그 값을 나머지에 모두 활용한다.

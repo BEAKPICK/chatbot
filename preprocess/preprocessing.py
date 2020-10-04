@@ -45,6 +45,10 @@ def bind_id_all(qdata, adata, padding_num):
         id_to_word[idx] = i
         idx+=1
 
+    # padding_num도 딕셔너리에 공백으로 추가
+    word_to_id[''] = padding_num
+    id_to_word[padding_num] = ''
+
     return word_to_id, id_to_word, max_len
 
 # parameter target_data[[]]

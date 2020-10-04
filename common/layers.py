@@ -452,8 +452,9 @@ class AddNorm:
         for n in range(N):
             dW[n] = np.sum(dout[n]*self.norm[n])
 
-        self.grads[0][...] = dW
-        self.grads[1][...] = db
+        self.grads[0][...] = dW / N
+        self.grads[1][...] = db / N
+
 
         x_mu = np.empty(dout.shape, dtype='f')
         for n in range(N):
@@ -469,9 +470,10 @@ class AddNorm:
             dmu[n] = np.sum(dx_norm[n] * (-1./self.stds[n])) + dvar[n] * np.mean(-2. * x_mu[n])
         dx = np.empty(dout.shape, dtype='f')
         for n in range(N):
-            dx[n] = (dx_norm[n] * (1./self.stds[n])) + (dvar[n] * 2 * x_mu[n] / N) + (dmu[n] / N)
+            dx[n] = (dx_norm[n] * (1./self.stds[n])) + (dvar[n] * 2 * x_mu[n]/N) + (dmu[n]/N)
 
         return dx
+
 
         # dout = dout.reshape((N*T,-1))
         # dout->(N*T,D)
@@ -491,12 +493,12 @@ class AddNorm:
         # self.grads[0][...] = daW / N
         # self.grads[1][...] = db
 
-        '''for n in range(N):
+        # for n in range(N):
             # dout[n] = dout[n] / self.stds[n]
             # dout[n] = (1./N) * (1/self.stds[n]) * (N*dout[n] - np.nansum(dout[n])
             #                                       - self.x[n]*np.nansum(dout[n]*self.x[n]))
 
-            dout[n] = (1. / N) * aW[n] * (1. / self.stds[n]) * (N * dout[n] - np.nansum(dout[n])
-                                                - (self.x[n] - self.means[n]) * ((1. / self.stds[n]) ** 2)
-                                                * np.nansum(dout[n] * (self.x[n] - self.means[n])))
-        return dout'''
+            # dout[n] = (1. / N) * aW[n] * (1. / self.stds[n]) * (N * dout[n] - np.nansum(dout[n])
+            #                                     - (self.x[n] - self.means[n]) * ((1. / self.stds[n]) ** 2)
+            #                                     * np.nansum(dout[n] * (self.x[n] - self.means[n])))
+        # return dout

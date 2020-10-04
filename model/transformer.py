@@ -111,8 +111,8 @@ class MultiHeadAttention:
         # dx->N,(T,num_heads*H)
 
         # dx를 head_size씩 num_heads만큼 잘라 각 ScaledDotAttention에 넘겨준다.
-        # 넘겨주고 받아온 Query Key Value에서 QK와 V따로 전파여부를 검사
-        # QK와 V를 따로 분리하지 않을 시 리턴되는 두 값은 같다.
+        # 넘겨주고 받아온 Query Key Value에서 Q와 KV따로 전파여부를 검사
+        # Q와 KV를 따로 분리하지 않을 시 리턴되는 두 값은 같다.
         cursor = 0
         ix = np.zeros_like(dout)
         ix2 = np.zeros_like(dout)
@@ -129,14 +129,13 @@ class MultiHeadAttention:
         return ix, ix2
 
 class TransformerEncoder:
-    def __init__(self, wordvec_size, head_size, num_heads, batch_size, d_ffnn=64, dropout=0.4):
+    def __init__(self, wordvec_size, head_size, num_heads, batch_size, d_ffnn=32, dropout=0.4):
         D, H = wordvec_size, head_size
         rn = np.random.randn
         self.multiheadattention = MultiHeadAttention(wordvec_size=wordvec_size,
                                                      head_size=head_size,
                                                      num_heads=num_heads)
-        # self.dropout = TimeDropout(dropout_ratio=dropout)
-        # self.addnorm1 = AddNorm()
+
         self.addnorm1 = AddNorm((rn(batch_size)/np.sqrt(batch_size)).astype('f'), np.zeros(batch_size).astype('f'))
 
         ffnn_W1 = (rn(D,d_ffnn)/np.sqrt(D)).astype('f')
@@ -157,32 +156,29 @@ class TransformerEncoder:
         # xs->N,(T,D)
         mx = self.multiheadattention.forward(xs)
         # mx->N,(T,D)
-        # an1x = self.addnorm1.forward(mx, xs)
+        an1x = self.addnorm1.forward(mx, xs)
         # an1x->N,(T,D)
-        fx = self.ffnn.forward(mx)
-        # fx = self.ffnn.forward(an1x)
+        fx = self.ffnn.forward(an1x)
         # fx->N,(T,D)
-        # an2x = self.addnorm2.forward(fx, an1x)
+        an2x = self.addnorm2.forward(fx, an1x)
 
-        return fx
+        return an2x
 
     def backward(self, dout):
         # dout->N,(T,D)
-        # an2dx = self.addnorm2.backward(dout)
+        an2dx = self.addnorm2.backward(dout)
         # an2dx->N,(T,D)
-        fdx = self.ffnn.backward(dout)
-        # fdx = self.ffnn.backward(an2dx)
+        fdx = self.ffnn.backward(an2dx)
 
         # feed forward covered with resnet(addnorm)
-        # fdx+=np.ones_like(fdx)
+        fdx+=an2dx
         # fdx->N,(T,D)
-        # an1dx = self.addnorm1.backward(fdx)
+        an1dx = self.addnorm1.backward(fdx)
         # an1dx->N,(T,D)
-        _, mdx = self.multiheadattention.backward(fdx)
-        # _, mdx = self.multiheadattention.backward(an1dx)
+        _, mdx = self.multiheadattention.backward(an1dx)
 
         # multiheadattention covered with resnet(addnorm)
-        # mdx+=np.ones_like(mdx)
+        mdx+=an1dx
 
         # mdx->N,(T,D)
         return mdx
@@ -198,7 +194,11 @@ class TransformerDecoder:
         # self.dropout1 = TimeDropout(dropout_ratio=dropout_ratio)
         # decoder의 multiheadattention는 input을 encoder로 부터 받는다.
         self.multiheadattention = MultiHeadAttention(wordvec_size=D,
-                                                     head_size=H,
+                                                     head_size=D,
+                                                     num_heads=num_heads)
+
+        self.multiheadattention2 = MultiHeadAttention(wordvec_size=D,
+                                                     head_size=D,
                                                      num_heads=num_heads)
 
         # self.addnorm1 = AddNorm()
@@ -217,9 +217,9 @@ class TransformerDecoder:
         # self.addnorm3 = AddNorm()
         self.addnorm3 = AddNorm((rn(batch_size) / np.sqrt(batch_size)).astype('f'), np.zeros(batch_size).astype('f'))
 
-        self.params = self.multiheadattention.params + self.ffnn.params \
+        self.params = self.multiheadattention.params + self.multiheadattention2.params + self.ffnn.params \
                       + self.addnorm1.params + self.addnorm2.params + self.addnorm3.params
-        self.grads = self.multiheadattention.grads + self.ffnn.grads \
+        self.grads = self.multiheadattention.grads + self.multiheadattention2.grads + self.ffnn.grads \
                      + self.addnorm1.grads + self.addnorm2.grads + self.addnorm3.grads
 
     def forward(self, xs, kv):
@@ -227,44 +227,42 @@ class TransformerDecoder:
         mmx = self.multiheadattention.forward(xs, mask=True)
 
         # an1x->N,(T,D)
-        # an1x = self.addnorm1.forward(xs, mmx)
+        an1x = self.addnorm1.forward(xs, mmx)
 
         # mx->N,(T,D)
-        mx = self.multiheadattention.forward(mmx, kv=kv)
-        # mx = self.multiheadattention.forward(an1x, kv=kv)
+        mx = self.multiheadattention2.forward(an1x, kv=kv)
 
         # an2x->N,(T,D)
-        # an2x = self.addnorm2.forward(mx, an1x)
+        an2x = self.addnorm2.forward(mx, an1x)
 
         # fx->N,(T,D)
-        fx = self.ffnn.forward(mx)
-        # fx = self.ffnn.forward(an2x)
+        fx = self.ffnn.forward(an2x)
 
         # an3x->N,(T,D)
-        # an3x = self.addnorm3.forward(fx, an2x)
+        an3x = self.addnorm3.forward(fx, an2x)
 
         return fx
 
     def backward(self, dout):
         # dout->N,(T,D)
-        # dout = self.addnorm3.backward(dout)
+        dout = self.addnorm3.backward(dout)
         # TimeDropout()
-        dout = self.ffnn.backward(dout)
+        fout = self.ffnn.backward(dout)
 
         # feed forward covered with resnet(addnorm)
-        # dout+=np.ones_like(dout)
-        # dout = self.addnorm2.backward(dout)
+        fout+=dout
+        dout = self.addnorm2.backward(fout)
         # ddout->N,(T,D)
-        ddout, dout = self.multiheadattention.backward(dout, querykvsep=True)
+        ddout, mout = self.multiheadattention.backward(dout, querykvsep=True)
 
         # multiheadattention covered with resnet(addnorm)
         # but ddout will be backpropagated without resnet(addnorm)
-        # dout = self.addnorm1.backward(dout+np.ones_like(dout))
-        _, dout = self.multiheadattention.backward(dout)
+        dout = self.addnorm1.backward(mout+dout)
+        _, mout = self.multiheadattention.backward(dout)
 
-        # dout+=np.ones_like(dout)
+        mout+=dout
 
-        return ddout, dout
+        return ddout, mout
 
     def generate(self, xs):
         # xs->1,(T,D)
@@ -294,15 +292,18 @@ class Transformer(BaseModel):
 
         # Double embed (encoder, decoder)
         embed_W1 = (rn(S, D) / 100).astype('f')
+        embed_W2 = (rn(S, D) / 100).astype('f')
         embed_W1[padding_num] = 0
+        embed_W2[padding_num] = 0
         self.e_embed = PositionalEmbedding(embed_W1)
-        self.params+=self.e_embed.params
-        self.grads+=self.e_embed.grads
+        self.d_embed = PositionalEmbedding(embed_W2)
+        self.params+=self.e_embed.params + self.d_embed.params
+        self.grads+=self.e_embed.grads + self.d_embed.grads
 
         self.encoders, self.decoders = [], []
         for _ in range(num_encoders):
             te = TransformerEncoder(wordvec_size=D,
-                                    head_size=H,
+                                    head_size=D,
                                     num_heads=num_heads,
                                     batch_size=batch_size)
             self.encoders.append(te)
@@ -311,7 +312,7 @@ class Transformer(BaseModel):
 
         for _ in range(num_decoders):
             td = TransformerDecoder(wordvec_size=D,
-                                    head_size=H,
+                                    head_size=D,
                                     num_heads=num_heads,
                                     batch_size=batch_size)
             self.decoders.append(td)
@@ -330,13 +331,13 @@ class Transformer(BaseModel):
         decoder_xs, decoder_ts = removeeos(ts), removesos(ts)
         # xs->(N,T) / eout, dout, ts->N,(T,D)
         eout = self.e_embed.forward(xs)
-        dout = self.e_embed.forward(decoder_xs)
+        dout = self.d_embed.forward(decoder_xs)
         N, T, D = eout.shape
 
         for encoder in self.encoders:
             eout = encoder.forward(eout)
         for decoder in self.decoders:
-            dout = decoder.forward(dout, eout)
+            dout = decoder.forward(dout, kv=eout)
 
         # score->(N*T,S)
         score = self.linear.forward(dout)
@@ -355,15 +356,15 @@ class Transformer(BaseModel):
         _,_,D = dout.shape
 
         # ddout->N,(T,D)
-        ddoutx = np.zeros((N,T,D), dtype='f')
+        ddout = np.zeros((N,T,D), dtype='f')
 
         for i in range(self.num_decoders-1,-1,-1):
             ddout, dout = self.decoders[i].backward(dout)
-            ddoutx += ddout
+
+        self.d_embed.backward(dout)
 
         # dout->N,(T,D)
-        ddout = self.encoders[-1].backward(ddoutx)
-        for i in range(self.num_encoders-2, -1, -1):
+        for i in range(self.num_encoders-1, -1, -1):
             ddout = self.encoders[i].backward(ddout)
 
         self.e_embed.backward(ddout)
@@ -373,7 +374,7 @@ class Transformer(BaseModel):
         # 'GPT'는 transformer의 decoder만 이용
         if type == 'GPT':
             # xs->(T,), out->(T,D)
-            out = self.e_embed.forward(xs)
+            out = self.d_embed.forward(xs)
 
             # out->(1,T,D)
             # out = out[np.newaxis,:]
